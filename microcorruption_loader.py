@@ -257,11 +257,7 @@ def mc_project(
     """
     # Create the project
     proj = angr.Project(
-        path,
-        *args,
-        explicit_sections=explicit_sections,
-        main_opts={"backend": "microcorruption"},
-        **kwargs,
+        path, *args, main_opts={"backend": "microcorruption"}, **kwargs,
     )
     # Set the number of bits in the architecture back to 16: see the hack in
     # the MC_Loader __init__ function above.
