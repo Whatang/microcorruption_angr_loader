@@ -20,12 +20,11 @@ from construct import (
 )
 from angr_platforms.msp430 import arch_msp430, lift_msp430, simos_msp430
 
-MC_Address = Byte[4]
-MC_Address_Padding = Const(b":   ")
-MC_ByteVal = Byte[2]
+_MC_Address = Byte[4]
+_MC_ByteVal = Byte[2]
 
 
-class IsHexValidator(Validator):
+class _IsHexValidator(Validator):
 
     chars = set(b"abcdefABCDEF0123456789")
 
@@ -33,11 +32,11 @@ class IsHexValidator(Validator):
         return all(o in self.chars for o in obj)
 
 
-MC_HexAddress = IsHexValidator(MC_Address)
-MC_HexByteVal = IsHexValidator(MC_ByteVal)
+_MC_HexAddress = _IsHexValidator(_MC_Address)
+_MC_HexByteVal = _IsHexValidator(_MC_ByteVal)
 
 
-class BigEndHexAdapter(Adapter):
+class _BigEndHexAdapter(Adapter):
     def _decode(self, obj, context, path):
         return int("".join(chr(x) for x in obj), 16)
 
@@ -45,11 +44,11 @@ class BigEndHexAdapter(Adapter):
         return ("%02x" % obj).encode("ascii")
 
 
-MC_BigEndAddress = BigEndHexAdapter(MC_HexAddress)
-MC_BigEndByte = BigEndHexAdapter(MC_HexByteVal)
+_MC_BigEndAddress = _BigEndHexAdapter(_MC_HexAddress)
+_MC_BigEndByte = _BigEndHexAdapter(_MC_HexByteVal)
 
-NewLine = Select(Const(b"\x0d\x0a"), Const(b"\x0a"))
-Spaces = GreedyRange(Const(b" "))
+_NewLine = Select(Const(b"\x0d\x0a"), Const(b"\x0a"))
+_Spaces = GreedyRange(Const(b" "))
 
 TerminatedString = lambda term, encoding="utf8": StringEncoded(
     NullTerminated(GreedyBytes, term=bytes(term, encoding)), encoding
@@ -59,7 +58,7 @@ TerminatedStringOrEOF = lambda term, encoding="utf8": StringEncoded(
 )
 
 
-class RemoveWindowsNewLine(Adapter):
+class _RemoveWindowsNewLine(Adapter):
     def _decode(self, obj, ctx, path):
         if len(obj) > 0 and obj[-1] == "\r":
             obj = obj[:-1]
@@ -69,22 +68,24 @@ class RemoveWindowsNewLine(Adapter):
         return obj
 
 
-LinuxNewLineTerminatedString = lambda encoding="utf8": TerminatedString("\n", encoding)
-LinuxNewLineTerminatedStringOrEOF = lambda encoding="utf8": TerminatedStringOrEOF(
+_LinuxNewLineTerminatedString = lambda encoding="utf8": TerminatedString("\n", encoding)
+_LinuxNewLineTerminatedStringOrEOF = lambda encoding="utf8": TerminatedStringOrEOF(
     "\n", encoding
 )
-NewLineTerminatedString = lambda encoding="utf8": RemoveWindowsNewLine(
-    LinuxNewLineTerminatedString(encoding)
+NewLineTerminatedString = lambda encoding="utf8": _RemoveWindowsNewLine(
+    _LinuxNewLineTerminatedString(encoding)
 )
-NewLineTerminatedStringOrEOF = lambda encoding="utf8": RemoveWindowsNewLine(
-    LinuxNewLineTerminatedStringOrEOF(encoding)
+NewLineTerminatedStringOrEOF = lambda encoding="utf8": _RemoveWindowsNewLine(
+    _LinuxNewLineTerminatedStringOrEOF(encoding)
 )
 
 
-MC_BytePair = Struct("b1" / MC_BigEndByte, "b2" / Optional(MC_BigEndByte), Const(b" "))
+_MC_BytePair = Struct(
+    "b1" / _MC_BigEndByte, "b2" / Optional(_MC_BigEndByte), Const(b" ")
+)
 
 
-class FlattenByteList(Adapter):
+class _FlattenByteList(Adapter):
     @staticmethod
     def _mc_get_byte_pair_as_list(obj):
         result = []
@@ -103,28 +104,27 @@ class FlattenByteList(Adapter):
         raise NotImplementedError()
 
 
-MC_ByteList = FlattenByteList(GreedyRange(MC_BytePair + Spaces))
+_MC_ByteList = _FlattenByteList(GreedyRange(_MC_BytePair + _Spaces))
 
-MC_ByteList.parse(b"3140 4830 1542 5c01 75f3 35d0 085a 3f40   ")
-
-MC_Dump_Line = Struct(
-    "address" / MC_BigEndAddress,
-    MC_Address_Padding,
-    "bytevals" / MC_ByteList,
+_MC_Dump_Line = Struct(
+    "address" / _MC_BigEndAddress,
+    Const(b":"),
+    _Spaces,
+    "bytevals" / _MC_ByteList,
     Check(len_(this.bytevals) > 0),
     Check(len_(this.bytevals) <= 16),
     NewLineTerminatedStringOrEOF(),
 )
 
 
-MC_Section_End = Struct(
-    "address" / MC_BigEndAddress, MC_Address_Padding, Const(b"*"), Spaces, NewLine
+_MC_Section_End = Struct(
+    "address" / _MC_BigEndAddress, Const(b":"), _Spaces, Const(b"*"), _Spaces, _NewLine
 )
 
-MC_Section = Struct(
-    "lines" / GreedyRange(MC_Dump_Line),
+_MC_Section = Struct(
+    "lines" / GreedyRange(_MC_Dump_Line),
     Check(len_(this.lines) > 0),
-    Optional(MC_Section_End),
+    Optional(_MC_Section_End),
     "address" / Computed(this.lines[0].address),
     "length"
     / Computed(
@@ -133,12 +133,12 @@ MC_Section = Struct(
 )
 
 
-MC_Dump = Struct("sections" / GreedyRange(MC_Section))
+MC_Dump_Parser = Struct("sections" / GreedyRange(_MC_Section))
 
 
 class MC_Loader(angr.cle.backends.Backend):
     def __init__(self, path, *args, **kwargs):
-        parsed = MC_Dump.parse_file(path)
+        parsed = MC_Dump_Parser.parse_file(path)
         super(MC_Loader, self).__init__(
             path, arch="msp430", entry_point=0x4400, *args, **kwargs
         )
@@ -204,7 +204,7 @@ class MC_Loader(angr.cle.backends.Backend):
     @staticmethod
     def is_compatible(stream):
         stream.seek(0)
-        parsed = MC_Dump.parse_stream(stream)
+        parsed = MC_Dump_Parser.parse_stream(stream)
         stream.seek(0)
         return len(parsed.sections) > 0
 
@@ -220,7 +220,7 @@ def mc_project(path, disassembly_path=None, hook_standard=True, *args, **kwargs)
     
     Keyword Arguments:
         disassembly_path {Str} -- If given, path to the disassembly file for hooking symbols. (default: {None})
-    
+        hook_standard {Bool} -- Hooks getsn, puts, and __stop_progExec__ with angr_platforms implementations if True. (default: {True})
     Returns:
         angr.Project -- A loaded project.
     """
@@ -240,47 +240,47 @@ _simprocs = {
     "__stop_progExec__": simos_msp430.MCstopexec,
 }
 
-MC_Symbol = Select(
+_MC_Symbol = Select(
     FocusedSeq("name", Const(b"<"), "name" / TerminatedString(">")),
     FocusedSeq("name", Const(b"."), "name" / TerminatedString(":")),
 )
 
-MC_Symbol_Line = Struct(
-    "address" / MC_BigEndAddress,
-    Spaces,
-    "symbol" / MC_Symbol,
+_MC_Symbol_Line = Struct(
+    "address" / _MC_BigEndAddress,
+    _Spaces,
+    "symbol" / _MC_Symbol,
     NewLineTerminatedStringOrEOF(),
 )
-MC_Instruction = FocusedSeq(
+_MC_Instruction = FocusedSeq(
     "i",
-    "i" / GreedyRange(FocusedSeq("x", "x" / MC_BigEndAddress, Const(b" "))),
+    "i" / GreedyRange(FocusedSeq("x", "x" / _MC_BigEndAddress, Const(b" "))),
     Check(lambda ctx: (len(ctx.i) > 0 and len(ctx.i) < 4)),
 )
-MC_Instruction_Line = Struct(
-    "address" / MC_BigEndAddress,
+_MC_Instruction_Line = Struct(
+    "address" / _MC_BigEndAddress,
     Const(b":"),
-    Spaces,
+    _Spaces,
     "disassembly"
     / Struct(
-        "instruction_bytes" / MC_Instruction,
-        Spaces,
+        "instruction_bytes" / _MC_Instruction,
+        _Spaces,
         "disassembly" / NewLineTerminatedStringOrEOF(),
     ),
 )
-MC_String_Line = Struct(
-    "address" / MC_BigEndAddress,
+_MC_String_Line = Struct(
+    "address" / _MC_BigEndAddress,
     Const(b":"),
-    Spaces,
+    _Spaces,
     Const(b'"'),
     "string" / TerminatedString('"'),
     NewLineTerminatedStringOrEOF(),
 )
-MC_Bad_Line = "badline" / NewLineTerminatedString()
-MC_Disassembly_Line = Select(
-    MC_Symbol_Line, MC_Instruction_Line, MC_String_Line, MC_Bad_Line
+_MC_Bad_Line = "badline" / NewLineTerminatedString()
+_MC_Disassembly_Line = Select(
+    _MC_Symbol_Line, _MC_Instruction_Line, _MC_String_Line, _MC_Bad_Line
 )
 MC_Disassembly_Parser = Struct(
-    "lines" / GreedyRange(MC_Disassembly_Line),
+    "lines" / GreedyRange(_MC_Disassembly_Line),
     "symbols" / Computed(lambda ctx: [l for l in ctx.lines if hasattr(l, "symbol")]),
     "disassembly"
     / Computed(lambda ctx: [l for l in ctx.lines if hasattr(l, "disassembly")]),
