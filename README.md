@@ -1,6 +1,6 @@
 # Microcorruption backend for angr
 
-An [angr](https://angr.io) backend for live memory dumps from the [microcorruption CTF](https://microcorruption.com/). It loads a project for the MSP430 implementation in [angr-platforms](https://github.com/angr/angr-platforms).
+An [angr](https://angr.io) backend for memory dumps and disassembly from the [microcorruption CTF](https://microcorruption.com/). It creates an angr project for the MSP430 implementation in [angr-platforms](https://github.com/angr/angr-platforms).
 
 ## Installation
 
@@ -8,16 +8,28 @@ An [angr](https://angr.io) backend for live memory dumps from the [microcorrupti
 pip install git+https://github.com/Whatang/microcorruption_angr_loader.git
 ```
 
+Or, if you've cloned this repo locally, you can do:
+
+```bash
+pip install .
+```
+
+If you need/want to develop this module while using it, install an editable version:
+
+```bash
+pip install -e .
+```
+
 ## Usage
 
-You need to copy the contents of a challenge's live memory dump window into a file, e.g. "memory_dump.txt".
+You need to copy the contents of a challenge's live memory dump window into a file, e.g. `memory_dump.txt`. This file should contain the unchanged copied & pasted text from the memory dump window on the microcorruption website.
 
 ```python
 import microcorruption_loader
 proj = microcorruption_loader.mc_project("memory_dump.txt")
 ```
 
-This creates an `angr.Project` ready for you to analyze. You should create it this way rather than using the microcorruption backend directly because we need to wrap some hacking around the project creation to make it work. See "Implementation Details" below if you're interested.
+This creates an `angr.Project` object ready for you to analyze. You should create it this way rather than using the microcorruption backend directly because we need to wrap a hack around the project creation to make it work. See [Implementation Details](#implementation-details) below if you're interested.
 
 ### Symbol hooking
 
@@ -34,7 +46,8 @@ The symbol parsing and hooking can be done in 2 ways.
 2. Do it all at the time of loading the project:
 
    ```python
-   proj = microcorruption_loader.mc_project("memory_dump.txt", "disassembly.txt")
+   proj = microcorruption_loader.mc_project("memory_dump.txt",
+                                            "disassembly.txt")
    ```
 
 Note that **all** symbols in the disassembly are parsed out and added to the loader, not just those which are hooked.
@@ -52,9 +65,10 @@ To **just** parse out the symbols from the disassembly without hooking with the 
 2. Parse the symbols when loading the project, and explicitly don't hook the standard functions:
 
    ```python
-   proj = microcorruption_loader.mc_project("memory_dump.txt", "disassembly.txt"
+   proj = microcorruption_loader.mc_project("memory_dump.txt", 
+                                            "disassembly.txt",
                                             hook_standard=False)
-   ```
+P   ```
 
 ## Implementation Details
 
