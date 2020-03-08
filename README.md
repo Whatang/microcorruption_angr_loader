@@ -76,8 +76,22 @@ There are 2 main things to discuss here: the parsing of the two files, and the r
 
 ### Parsing
 
-**TODO**: write this up.
+[Construct](https://construct.readthedocs.io/) is used to build parsers for both the memory dump and disassembly view.
+
+For the memory dump, each line is parsed to retrieve the bytes indicated and the address that they are at. These lines are consolidated into "sections", which are stored into memory by the backend.
+
+Parsing the disassembly view is more complicated. Each line can be either a symbol, a disassembled instruction, or string data. There's also the possibility that there's a line which can't be parsed as any of those, so we allow for that too. The parser just works out which of the line types is which and parses accordingly, then creates lists of symbols, dissassembly lines, and strings. The symbols are loaded into the project along with their address - nothing is done with the other lines at present, but they're there if you wanted to use them yourself.
 
 ### Project creation
 
-**TODO**: write this up.
+There's a hack in the creation of the project. The MSP430 is a 16-bit platform, so the addresses avaiable run from 0x0 to 0xFFFF. All these addresses are used/assigned in the creation of the `angr` project: every byte is initially set to zero, then values are assigned from the parsed memory dump.
+
+However, angr itself needs some storage in the address space to keep track of symbols and various other things. I confess I don't really understand why this has to be tracked in the project's address space, but it seems to be the case. Unfortunately if the entire address space is full then angr can't find anywhere to store its bookkeeping information. I asssume this isn't really a problem on 32-bit platforms since there's usually plenty of unused memory available, but our loader already uses the entire address space. Therefore angr errors when we try to load a project, because it can't assign anywhere in memory for its "external" object.
+
+This is where the hack comes in. At the time of memory creation, we tell angr that the architecture is 32-bits. This lets angr find some available memory at 0x10000, which is of course outside the "real" address space. Then, once angr has successfully loaded everything up, we change the architecture size back to 16-bits.
+
+Since this is such a nasty hack, it's entirely possible that something unpleasant/unforeseen will happen, but it seems to have been working OK so far.
+
+An alternative approach would be to only add backed memory for the known "sections" parsed from the memory dump file. The problem with that is that some of the challenges write to memory which is not obviously allocated at startup. This would cause two issues: firstly, we'd risk angr using some memory which was later addressed by the target program itself. Secondly, even if that didn't happen, the program would error when it tried to read/write the unknown memory since we wouldn't have told angr about it.
+
+This could possibly be mitigated by adding a facility to reserve certain memory sections, but the existing solution is easier for the time being. However, if the option `explicit_sections=True` is passed to the `mc_project` function then this technique is used: memory is only created and assigned for those bytes which are explicitly specified in the memory dump, and the "temporarily 32-bit architecture" hack is not used. One way of using this is to run the challenge binary in the microcorruption debugger up to a point where (you hope) all memory that is going to be used is now assigned and listed in the memory view. You can then copy and paste the live contents of the memory window as your memory dump, and let angr find somewhere in the remaining memory to put its stuff.
