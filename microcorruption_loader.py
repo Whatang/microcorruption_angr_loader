@@ -18,7 +18,7 @@ from construct import (
     Adapter,
     ListContainer,
 )
-from angr_platforms.msp430 import arch_msp430, lift_msp430, simos_msp430
+from angr_platforms.msp430 import lift_msp430, simos_msp430
 
 _MC_Address = Byte[4]
 _MC_ByteVal = Byte[2]
