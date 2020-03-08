@@ -137,11 +137,18 @@ MC_Dump_Parser = Struct("sections" / GreedyRange(_MC_Section))
 
 
 class MC_Loader(angr.cle.backends.Backend):
-    def __init__(self, path, *args, **kwargs):
-        parsed = MC_Dump_Parser.parse_file(path)
+    def __init__(self, path, explicit_sections=False, *args, **kwargs):
         super(MC_Loader, self).__init__(
             path, arch="msp430", entry_point=0x4400, *args, **kwargs
         )
+        if not explicit_sections:
+            self._load_from_initial_state(path)
+        else:
+            self._load_explicit_sections(path)
+
+    def _load_from_initial_state(self, path):
+        parsed = MC_Dump_Parser.parse_file(path)
+
         # Set this so that there's enough space for the extern_object.
         # Since the memory dump fills up the 16-bit entire memory space,
         # there is nowhere left for the extern_object to go. Making the
@@ -163,6 +170,21 @@ class MC_Loader(angr.cle.backends.Backend):
         # a syscall or hook? It doesn't show up in the memory dump, so we add it
         # in manually here.
         self.memory.store(0x10, b"\x30\x41")
+
+    def _load_explicit_sections(self, path):
+        parsed = MC_Dump_Parser.parse_file(path)
+
+        self.arch.bits = 16
+
+        self._max_addr = 0xFFFF
+        self._min_addr = 0x0
+        for section in parsed.sections:
+            print(
+                "Loading data with 0x%0x bytes at address 0x%04x"
+                % (section.length, section.address)
+            )
+            self.memory.add_backer(section.address, b"\x00" * section.length)
+            self.memory.store(section.address, self._make_section(section))
 
     def make_symbols(self, disassembly_path):
         print("parsing")
@@ -212,20 +234,40 @@ class MC_Loader(angr.cle.backends.Backend):
 angr.cle.register_backend("microcorruption", MC_Loader)
 
 
-def mc_project(path, disassembly_path=None, hook_standard=True, *args, **kwargs):
+def mc_project(
+    path,
+    disassembly_path=None,
+    hook_standard=True,
+    explicit_sections=False,
+    *args,
+    **kwargs,
+):
     """Load and return a microcorruption angr project.
-    
+
     Arguments:
         path {Str} -- Path to the microcorruption memory dump file.
-    
+
     Keyword Arguments:
         disassembly_path {Str} -- If given, path to the disassembly file for hooking symbols. (default: {None})
         hook_standard {Bool} -- Hooks getsn, puts, and __stop_progExec__ with angr_platforms implementations if True. (default: {True})
+        explicit_sections {Bool} -- If set to True, only create backed memory for the bytes that are explicitly specified in the memory dump. (default: {False})
+
     Returns:
         angr.Project -- A loaded project.
     """
-    proj = angr.Project(path, *args, main_opts={"backend": "microcorruption"}, **kwargs)
+    # Create the project
+    proj = angr.Project(
+        path,
+        *args,
+        explicit_sections=explicit_sections,
+        main_opts={"backend": "microcorruption"},
+        **kwargs,
+    )
+    # Set the number of bits in the architecture back to 16: see the hack in
+    # the MC_Loader __init__ function above.
     proj.loader.main_object.arch.bits = 16
+    # If we have a path to a disassembly file, parse it and possibly do some
+    # hooking.
     if disassembly_path is not None:
         if hook_standard:
             hook_mc_symbols(disassembly_path, proj)
