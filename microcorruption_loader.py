@@ -276,6 +276,8 @@ _simprocs = {
     "puts": simos_msp430.MCputs,
     "getsn": simos_msp430.MCgetsn,
     "__stop_progExec__": simos_msp430.MCstopexec,
+    "strcpy": angr.SIM_PROCEDURES["libc"]["strcpy"],
+    "memset": angr.SIM_PROCEDURES["libc"]["memset"],
 }
 
 _MC_Symbol = Select(
@@ -348,6 +350,7 @@ def hook_mc_symbols(disassembly_path, angr_project, simprocs=None):
     if simprocs is None:
         simprocs = _simprocs
     for sym_name in simprocs.keys():
-        print(f"Hooking {sym_name} with {simprocs[sym_name]}")
-        angr_project.hook_symbol(sym_name, simprocs[sym_name]())
+        print(f"Hooking {sym_name} with {simprocs[sym_name]}: ", end="")
+        success = angr_project.hook_symbol(sym_name, simprocs[sym_name]())
+        print(f"{success}")
 
