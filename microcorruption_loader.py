@@ -1,4 +1,5 @@
 import angr
+import cle
 from construct import (
     Byte,
     Const,
@@ -136,29 +137,37 @@ _MC_Section = Struct(
 MC_Dump_Parser = Struct("sections" / GreedyRange(_MC_Section))
 
 
-class MC_Loader(angr.cle.backends.Backend):
-    def __init__(self, path, explicit_sections=False, *args, **kwargs):
+class MC_Loader(cle.Backend):
+    def __init__(
+        self,
+        path,
+        binary_stream,
+        safe_area=-1,
+        explicit_sections=False,
+        *args,
+        **kwargs,
+    ):
         super(MC_Loader, self).__init__(
-            path, arch="msp430", entry_point=0x4400, *args, **kwargs
+            path,
+            binary_stream=binary_stream,
+            arch="msp430",
+            entry_point=0x4400,
+            *args,
+            **kwargs,
         )
+
         if not explicit_sections:
-            self._load_from_initial_state(path)
+            self._load_from_initial_state(path, safe_area)
         else:
             self._load_explicit_sections(path)
 
-    def _load_from_initial_state(self, path):
+    def _load_from_initial_state(self, path, safe_area):
         parsed = MC_Dump_Parser.parse_file(path)
 
-        # Set this so that there's enough space for the extern_object.
-        # Since the memory dump fills up the 16-bit entire memory space,
-        # there is nowhere left for the extern_object to go. Making the
-        # architecture pretend to be 32 bits for a while makes it work.
-        # This feels really hacky, and it may well break something subtle
-        # elsewhere.
         self.arch.bits = 32
 
-        self._max_addr = 0xFFFF
         self._min_addr = 0x0
+        self._max_addr = 0xFFFF
         self.memory.add_backer(0, b"\x00" * 0x10000)
         for section in parsed.sections:
             print(
@@ -185,6 +194,8 @@ class MC_Loader(angr.cle.backends.Backend):
             )
             self.memory.add_backer(section.address, b"\x00" * section.length)
             self.memory.store(section.address, self._make_section(section))
+        self.memory.add_backer(0x10, b"\x00" * 16)
+        self.memory.store(0x10, b"\x30\x41")
 
     def make_symbols(self, disassembly_path):
         print("parsing")
@@ -239,6 +250,7 @@ def mc_project(
     disassembly_path=None,
     hook_standard=True,
     explicit_sections=False,
+    safe_area=-1,
     *args,
     **kwargs,
 ):
@@ -251,13 +263,22 @@ def mc_project(
         disassembly_path {Str} -- If given, path to the disassembly file for hooking symbols. (default: {None})
         hook_standard {Bool} -- Hooks getsn, puts, and __stop_progExec__ with angr_platforms implementations if True. (default: {True})
         explicit_sections {Bool} -- If set to True, only create backed memory for the bytes that are explicitly specified in the memory dump. (default: {False})
+        safe_area {int} - If given, an area of 0x200 bytes in memory which angr can safely use for bookkeeping. (default: {-1})
 
     Returns:
         angr.Project -- A loaded project.
     """
     # Create the project
     proj = angr.Project(
-        path, *args, main_opts={"backend": "microcorruption"}, **kwargs,
+        path,
+        *args,
+        main_opts={
+            "backend": "microcorruption",
+            "explicit_sections": explicit_sections,
+            "safe_area": safe_area,
+        },
+        load_options={"rebase_granularity": 8},
+        **kwargs,
     )
     # Set the number of bits in the architecture back to 16: see the hack in
     # the MC_Loader __init__ function above.

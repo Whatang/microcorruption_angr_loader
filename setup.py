@@ -8,6 +8,5 @@ setup(
         "from the microcorruption CTF."
     ),
     py_modules=["microcorruption_loader"],
-    install_requires=["construct", "angr", "angr-platforms"],
-    dependency_links=["https://github.com/angr/angr-platforms.git"],
+    install_requires=["construct", "angr", "angr-platforms @ git+https://github.com/angr/angr-platforms"],
 )
